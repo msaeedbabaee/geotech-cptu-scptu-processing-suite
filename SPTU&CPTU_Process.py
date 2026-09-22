@@ -1,6 +1,6 @@
 """
-Advanced CPTu / SCPTu Continuous Processing & Subsurface Characterization Engine.
-Integrated with Robertson (1990) 9-Zone Normalized SBTn & Jefferies & Been (2015) Ic Boundaries.
+Production-grade continuous CPTu / SCPTu processing & soil characterization suite.
+Features 9-zone Robertson (1990) SBTn classification with robust Ic arc boundaries.
 Strictly compliant with the Canadian Foundation Engineering Manual (CFEM Ch 5).
 """
 
@@ -273,14 +273,19 @@ def calculate_ic_contour_arcs(ic_values: List[float]) -> Dict[float, Tuple[np.nd
     center_y = 3.0
 
     for ic in ic_values:
-        theta = np.linspace(-0.95 * np.pi / 2, 0.05 * np.pi, 100)
+        # Sweep full quadrant angles smoothly to guarantee intersection
+        theta = np.linspace(-np.pi / 2.0, np.pi / 2.0, 300)
         log_fr = center_x + (ic * np.cos(theta)) / 1.3
         log_q = center_y - (ic * np.sin(theta))
 
+        # Check bounds within chart display window
         valid = (log_fr >= -1.0) & (log_fr <= 1.1) & (log_q >= -0.3) & (log_q <= 3.0)
         fr_vals = 10.0 ** log_fr[valid]
         q_vals = 10.0 ** log_q[valid]
-        contours[ic] = (fr_vals, q_vals)
+
+        # Only store non-empty curve segments
+        if len(fr_vals) > 0:
+            contours[ic] = (fr_vals, q_vals)
 
     return contours
 
@@ -306,6 +311,7 @@ def generate_benchmark_scptu_dataset() -> pd.DataFrame:
         elif z <= 14.0:
             qc = 1.1 + 0.12 * (z - 5.0) + np.random.normal(0, 0.06)
             fs = qc * 0.032 + np.random.normal(0, 0.003)
+            # High dynamic excess pore pressure in undrained penetration
             u2 = (9.81 * max(0.0, z - 2.0)) + 35.0 * (z - 5.0) + np.random.normal(0, 4.0)
             vs = 135.0 + 4.5 * (z - 5.0) + np.random.normal(0, 3.0)
         # Layer 3: Dense Glacial Sand-Gravel Till (> 14.0m)
@@ -491,7 +497,7 @@ class RobertsonChartPlotter:
                 )
             )
 
-        # 2. Ic contour boundaries
+        # 2. Ic contour boundaries with length checking
         ic_contours = calculate_ic_contour_arcs([1.31, 2.05, 2.60, 2.95, 3.60])
         ic_names = {
             1.31: "Ic = 1.31 (Gravelly Sand)",
@@ -502,13 +508,15 @@ class RobertsonChartPlotter:
         }
 
         for ic_val, (fr_line, q_line) in ic_contours.items():
+            if len(fr_line) == 0:
+                continue
             fig.add_trace(
                 go.Scatter(
                     x=fr_line,
                     y=q_line,
                     mode="lines",
                     line=dict(color="#37474f", width=2.0),
-                    name=ic_names[ic_val],
+                    name=ic_names.get(ic_val, f"Ic = {ic_val:.2f}"),
                     hoverinfo="text",
                     text=f"Boundary Ic = {ic_val:.2f}",
                     showlegend=True
@@ -612,17 +620,21 @@ class RobertsonChartPlotter:
             )
             ax.add_patch(polygon)
 
-        # Draw constant Ic contour boundaries
+        # Draw constant Ic contour boundaries with defensive index handling
         ic_contours = calculate_ic_contour_arcs([1.31, 2.05, 2.60, 2.95, 3.60])
         for ic_val, (fr_line, q_line) in ic_contours.items():
+            if len(fr_line) == 0:
+                continue
+
             ax.plot(fr_line, q_line, color="#263238", lw=1.8, zorder=2)
             idx_mid = int(len(fr_line) * 0.45)
-            ax.text(
-                fr_line[idx_mid], q_line[idx_mid], f"$I_c={ic_val}$",
-                fontsize=8, fontweight='bold', color="#263238",
-                rotation=-40, ha="center", va="center",
-                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.7)
-            )
+            if idx_mid < len(fr_line):
+                ax.text(
+                    fr_line[idx_mid], q_line[idx_mid], f"$I_c={ic_val}$",
+                    fontsize=8, fontweight='bold', color="#263238",
+                    rotation=-40, ha="center", va="center",
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.7)
+                )
 
         # Add zone label boxes
         for item in ZONE_ANNOTATIONS:
